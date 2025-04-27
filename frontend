@@ -1,0 +1,310 @@
+import javax.swing.*;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.awt.event.*;
+import java.sql.*;
+
+public class InventoryManagementGUI extends JFrame {
+
+    static final String DB_URL = "jdbc:mysql://localhost:3306/retailmanagement";
+    static final String USER = "root";
+    static final String PASS = "srikar2811";
+
+    Connection conn;
+
+    public InventoryManagementGUI() {
+        setTitle("Inventory Management System");
+        setSize(800, 600);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        try {
+            conn = DriverManager.getConnection(DB_URL, USER, PASS);
+        } catch (SQLException e) {
+            JOptionPane.showMessageDialog(this, "Database connection failed!");
+            e.printStackTrace();
+        }
+
+        JTabbedPane tabbedPane = new JTabbedPane();
+
+        tabbedPane.addTab("Suppliers", createSupplierPanel());
+        tabbedPane.addTab("Products", createProductPanel());
+        tabbedPane.addTab("Inventory", createInventoryPanel());
+        tabbedPane.addTab("Retailers", createRetailerPanel());
+
+        add(tabbedPane);
+    }
+
+    private JPanel createSupplierPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        JPanel form = new JPanel(new GridLayout(3, 2));
+        JTextField nameField = new JTextField();
+        JTextField phoneField = new JTextField();
+        JButton addBtn = new JButton("Add Supplier");
+
+        form.add(new JLabel("Name:"));
+        form.add(nameField);
+        form.add(new JLabel("Phone:"));
+        form.add(phoneField);
+        form.add(new JLabel(""));
+        form.add(addBtn);
+
+        panel.add(form, BorderLayout.NORTH);
+
+        JTable table = new JTable();
+        JScrollPane scrollPane = new JScrollPane(table);
+        panel.add(scrollPane, BorderLayout.CENTER);
+
+        addBtn.addActionListener(e -> {
+            String name = nameField.getText();
+            String phone = phoneField.getText();
+            try (PreparedStatement ps = conn.prepareStatement("INSERT INTO Supplier (Name, PhoneNo) VALUES (?, ?)")) {
+                ps.setString(1, name);
+                ps.setString(2, phone);
+                ps.executeUpdate();
+                JOptionPane.showMessageDialog(this, "Supplier added!");
+                nameField.setText("");
+                phoneField.setText("");
+                loadTable(table, "SELECT * FROM Supplier");
+                alignTableCenter(table);
+            } catch (SQLException ex) {
+                ex.printStackTrace();
+            }
+        });
+
+        loadTable(table, "SELECT * FROM Supplier");
+        alignTableCenter(table);
+        return panel;
+    }
+
+    private JPanel createProductPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        JPanel form = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.anchor = GridBagConstraints.WEST;
+
+        JLabel pidLabel = new JLabel("Product ID:");
+        JLabel sidLabel = new JLabel("Supplier ID:");
+        JLabel nameLabel = new JLabel("Name:");
+        JLabel qtyLabel = new JLabel("Quantity:");
+        JLabel priceLabel = new JLabel("Price:");
+
+        JTextField pidField = new JTextField(15);
+        JTextField sidField = new JTextField(15);
+        JTextField nameField = new JTextField(15);
+        JTextField quantityField = new JTextField(15);
+        JTextField priceField = new JTextField(15);
+        JButton addBtn = new JButton("Add Product");
+
+        int row = 0;
+        gbc.gridx = 0; gbc.gridy = row; form.add(pidLabel, gbc);
+        gbc.gridx = 1; form.add(pidField, gbc);
+        row++;
+        gbc.gridx = 0; gbc.gridy = row; form.add(sidLabel, gbc);
+        gbc.gridx = 1; form.add(sidField, gbc);
+        row++;
+        gbc.gridx = 0; gbc.gridy = row; form.add(nameLabel, gbc);
+        gbc.gridx = 1; form.add(nameField, gbc);
+        row++;
+        gbc.gridx = 0; gbc.gridy = row; form.add(qtyLabel, gbc);
+        gbc.gridx = 1; form.add(quantityField, gbc);
+        row++;
+        gbc.gridx = 0; gbc.gridy = row; form.add(priceLabel, gbc);
+        gbc.gridx = 1; form.add(priceField, gbc);
+        row++;
+        gbc.gridx = 0; gbc.gridy = row; gbc.gridwidth = 2;
+        gbc.anchor = GridBagConstraints.CENTER;
+        form.add(addBtn, gbc);
+
+        panel.add(form, BorderLayout.NORTH);
+
+        JTable table = new JTable();
+        JScrollPane scrollPane = new JScrollPane(table);
+        panel.add(scrollPane, BorderLayout.CENTER);
+
+        addBtn.addActionListener(e -> {
+            int productId = Integer.parseInt(pidField.getText());
+            int supplierId = Integer.parseInt(sidField.getText());
+            String name = nameField.getText();
+            int quantity = Integer.parseInt(quantityField.getText());
+            double price = Double.parseDouble(priceField.getText());
+
+            try {
+                conn.setAutoCommit(false);
+
+                String checkQuery = "SELECT StockQuantity FROM Product WHERE ProductID = ?";
+                try (PreparedStatement ps = conn.prepareStatement(checkQuery)) {
+                    ps.setInt(1, productId);
+                    ResultSet rs = ps.executeQuery();
+
+                    if (rs.next()) {
+                        int currentStock = rs.getInt("StockQuantity");
+                        int newQuantity = currentStock + quantity;
+                        try (PreparedStatement updatePs = conn.prepareStatement(
+                                "UPDATE Product SET StockQuantity = ?, Price = ? WHERE ProductID = ?")) {
+                            updatePs.setInt(1, newQuantity);
+                            updatePs.setDouble(2, price);
+                            updatePs.setInt(3, productId);
+                            updatePs.executeUpdate();
+                        }
+                        try (PreparedStatement updateInventoryPs = conn.prepareStatement(
+                                "UPDATE Inventory SET StockQuantity = ? WHERE ProductID = ? AND SupplierID = ?")) {
+                            updateInventoryPs.setInt(1, newQuantity);
+                            updateInventoryPs.setInt(2, productId);
+                            updateInventoryPs.setInt(3, supplierId);
+                            updateInventoryPs.executeUpdate();
+                        }
+                        JOptionPane.showMessageDialog(this, "Product quantity updated!");
+                    } else {
+                        try (PreparedStatement psInsertProduct = conn.prepareStatement(
+                                "INSERT INTO Product (ProductID, Name, StockQuantity, Price) VALUES (?, ?, ?, ?)")) {
+                            psInsertProduct.setInt(1, productId);
+                            psInsertProduct.setString(2, name);
+                            psInsertProduct.setInt(3, quantity);
+                            psInsertProduct.setDouble(4, price);
+                            psInsertProduct.executeUpdate();
+                        }
+                        try (PreparedStatement psInsertInventory = conn.prepareStatement(
+                                "INSERT INTO Inventory (ProductID, SupplierID, StockQuantity) VALUES (?, ?, ?)")) {
+                            psInsertInventory.setInt(1, productId);
+                            psInsertInventory.setInt(2, supplierId);
+                            psInsertInventory.setInt(3, quantity);
+                            psInsertInventory.executeUpdate();
+                        }
+                        JOptionPane.showMessageDialog(this, "New product and inventory added!");
+                    }
+                }
+
+                conn.commit();
+
+                pidField.setText(""); sidField.setText(""); nameField.setText("");
+                quantityField.setText(""); priceField.setText("");
+                loadTable(table, "SELECT * FROM Product");
+                alignTableCenter(table);
+
+            } catch (SQLException ex) {
+                try {
+                    conn.rollback();
+                } catch (SQLException rollbackEx) {
+                    rollbackEx.printStackTrace();
+                }
+                ex.printStackTrace();
+                JOptionPane.showMessageDialog(this, "Error adding or updating product and inventory.");
+            } finally {
+                try {
+                    conn.setAutoCommit(true);
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                }
+            }
+        });
+
+        loadTable(table, "SELECT * FROM Product");
+        alignTableCenter(table);
+        return panel;
+    }
+
+    private JPanel createInventoryPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+
+        JTable table = new JTable();
+        JScrollPane scrollPane = new JScrollPane(table);
+        panel.add(scrollPane, BorderLayout.CENTER);
+
+        String query = "SELECT i.InventoryID, p.Name AS ProductName, s.Name AS SupplierName, i.StockQuantity " +
+                       "FROM Inventory i " +
+                       "JOIN Product p ON i.ProductID = p.ProductID " +
+                       "JOIN Supplier s ON i.SupplierID = s.SupplierID";
+        loadTable(table, query);
+        alignTableCenter(table);
+
+        return panel;
+    }
+
+    private JPanel createRetailerPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        JPanel form = new JPanel(new GridLayout(4, 2));
+        JTextField pidField = new JTextField();
+        JTextField quantityField = new JTextField();
+        JTextField amountField = new JTextField();
+        amountField.setEditable(false); // Make amount field non-editable
+        JButton addBtn = new JButton("Add Retailer Sale");
+
+        form.add(new JLabel("Product ID:"));
+        form.add(pidField);
+        form.add(new JLabel("Quantity:"));
+        form.add(quantityField);
+        form.add(new JLabel("Amount:"));
+        form.add(amountField);
+        form.add(new JLabel(""));
+        form.add(addBtn);
+
+        panel.add(form, BorderLayout.NORTH);
+
+        JTable table = new JTable();
+        JScrollPane scrollPane = new JScrollPane(table);
+        panel.add(scrollPane, BorderLayout.CENTER);
+
+        addBtn.addActionListener(e -> {
+            int productId = Integer.parseInt(pidField.getText());
+            int soldQty = Integer.parseInt(quantityField.getText());
+
+            try {
+                conn.setAutoCommit(false);
+
+                double price = 0;
+                int currentStock = 0;
+
+                String checkQuery = "SELECT p.Price, i.StockQuantity FROM Product p JOIN Inventory i ON p.ProductID = i.ProductID WHERE p.ProductID = ?";
+                try (PreparedStatement ps = conn.prepareStatement(checkQuery)) {
+                    ps.setInt(1, productId);
+                    ResultSet rs = ps.executeQuery();
+
+                    if (rs.next()) {
+                        price = rs.getDouble("Price");
+                        currentStock = rs.getInt("StockQuantity");
+
+                        if (currentStock < soldQty) {
+                            JOptionPane.showMessageDialog(this, "Insufficient inventory for the requested quantity.");
+                            return;
+                        }
+                    } else {
+                        JOptionPane.showMessageDialog(this, "Product not found or no inventory.");
+                        return;
+                    }
+                }
+
+                double amount = price * soldQty;
+
+                try (PreparedStatement ps = conn.prepareStatement("INSERT INTO Retailer (ProductID, Quantity, Amount) VALUES (?, ?, ?)")) {
+                    ps.setInt(1, productId);
+                    ps.setInt(2, soldQty);
+                    ps.setDouble(3, amount);
+                    ps.executeUpdate();
+                }
+
+                try (PreparedStatement ps = conn.prepareStatement("UPDATE Inventory SET StockQuantity = StockQuantity - ? WHERE ProductID = ?")) {
+                    ps.setInt(1, soldQty);
+                    ps.setInt(2, productId);
+                    ps.executeUpdate();
+                }
+
+                // Increment Customer ID logic
+                try (PreparedStatement ps = conn.prepareStatement("SELECT MAX(CustomerID) FROM Customer")) {
+                    ResultSet rs = ps.executeQuery();
+                    if (rs.next()) {
+                        int maxCustomerId = rs.getInt(1);
+                        try (PreparedStatement insertCustomer = conn.prepareStatement("INSERT INTO Customer (CustomerID) VALUES (?)")) {
+                            insertCustomer.setInt(1, maxCustomerId + 1);
+                            insertCustomer.executeUpdate();
+                        }
+                    }
+                }
+
+                conn.commit();
+                JOptionPane.showMessageDialog(this, "Retailer purchase recorded and inventory updated!");
+
+                pidField.setText
